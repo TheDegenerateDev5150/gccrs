@@ -91,16 +91,18 @@ Late::setup_builtin_types ()
     // insert it in the type context...
   };
 
-  for (const auto &builtin : builtins)
-    {
-      // we should be able to use `insert_at_root` or `insert` here, since we're
-      // at the root :) hopefully!
-      auto ok = ctx.types.insert (builtin.name, builtin.node_id);
-      rust_assert (ok);
+  // There's a special Rib for putting prelude items, since prelude items need
+  // to satisfy certain special rules.
+  ctx.scoped (Rib::Kind::Prelude, 0, [this, &ty_ctx] (void) -> void {
+    for (const auto &builtin : builtins)
+      {
+	auto ok = ctx.types.insert (builtin.name, builtin.node_id);
+	rust_assert (ok);
 
-      ctx.mappings.insert_node_to_hir (builtin.node_id, builtin.hir_id);
-      ty_ctx.insert_builtin (builtin.hir_id, builtin.node_id, builtin.type);
-    }
+	ctx.mappings.insert_node_to_hir (builtin.node_id, builtin.hir_id);
+	ty_ctx.insert_builtin (builtin.hir_id, builtin.node_id, builtin.type);
+      }
+  });
 
   // ...here!
   auto *unit_type = TyTy::TupleType::get_unit_type ();
@@ -213,7 +215,6 @@ Late::visit (AST::IdentifierExpr &expr)
   // TODO: same thing as visit(PathInExpression) here?
 
   tl::optional<Rib::Definition> resolved = tl::nullopt;
-
   if (auto value = ctx.values.get (expr.get_ident ()))
     {
       resolved = value;
@@ -231,21 +232,59 @@ Late::visit (AST::IdentifierExpr &expr)
     }
   else
     {
-      rust_error_at (expr.get_locus (),
-		     "could not resolve identifier expression: %qs",
-		     expr.get_ident ().as_string ().c_str ());
+      if (auto type = ctx.types.get_prelude (expr.get_ident ()))
+	{
+	  resolved = type;
+	}
+      else
+	{
+	  rust_error_at (expr.get_locus (), ErrorCode::E0425,
+			 "cannot find value %qs in this scope",
+			 expr.get_ident ().as_string ().c_str ());
+	  return;
+	}
+    }
+
+  if (resolved->is_ambiguous ())
+    {
+      rust_error_at (expr.get_locus (), ErrorCode::E0659, "%qs is ambiguous",
+		     expr.as_string ().c_str ());
       return;
     }
 
   ctx.map_usage (Usage (expr.get_node_id ()),
 		 Definition (resolved->get_node_id ()));
 
-  // in the old resolver, resolutions are kept in the resolver, not the mappings
-  // :/ how do we deal with that?
-  // ctx.mappings.insert_resolved_name(expr, resolved);
-
   // For empty types, do we perform a lookup in ctx.types or should the
   // toplevel instead insert a name in ctx.values? (like it currently does)
+}
+
+void
+Late::visit (AST::StructExprFieldIdentifier &expr)
+{
+  tl::optional<Rib::Definition> resolved = tl::nullopt;
+
+  if (auto value = ctx.values.get (expr.get_field_name ()))
+    {
+      resolved = value;
+    }
+  // seems like we don't need a type namespace lookup
+  else
+    {
+      rust_error_at (expr.get_locus (), "could not resolve struct field: %qs",
+		     expr.get_field_name ().as_string ().c_str ());
+      return;
+    }
+
+  if (resolved->is_ambiguous ())
+    {
+      rust_error_at (expr.get_locus (), ErrorCode::E0659, "%qs is ambiguous",
+		     expr.as_string ().c_str ());
+      return;
+    }
+
+  ctx.map_usage (Usage (expr.get_node_id ()),
+		 Definition (resolved->get_node_id ()));
 }
 
 void
@@ -348,6 +387,10 @@ Late::visit (AST::StructStruct &s)
 void
 Late::visit (AST::StructExprStruct &s)
 {
+  visit_outer_attrs (s);
+  visit_inner_attrs (s);
+  DefaultResolver::visit (s.get_struct_name ());
+
   auto resolved
     = ctx.resolve_path (s.get_struct_name ().get_segments (), Namespace::Types);
 
@@ -358,24 +401,34 @@ Late::visit (AST::StructExprStruct &s)
 void
 Late::visit (AST::StructExprStructBase &s)
 {
+  visit_outer_attrs (s);
+  visit_inner_attrs (s);
+  DefaultResolver::visit (s.get_struct_name ());
+  visit (s.get_struct_base ());
+
   auto resolved
     = ctx.resolve_path (s.get_struct_name ().get_segments (), Namespace::Types);
 
   ctx.map_usage (Usage (s.get_struct_name ().get_node_id ()),
 		 Definition (resolved->get_node_id ()));
-  DefaultResolver::visit (s);
 }
 
 void
 Late::visit (AST::StructExprStructFields &s)
 {
+  visit_outer_attrs (s);
+  visit_inner_attrs (s);
+  DefaultResolver::visit (s.get_struct_name ());
+  if (s.has_struct_base ())
+    visit (s.get_struct_base ());
+  for (auto &field : s.get_fields ())
+    visit (field);
+
   auto resolved
     = ctx.resolve_path (s.get_struct_name ().get_segments (), Namespace::Types);
 
   ctx.map_usage (Usage (s.get_struct_name ().get_node_id ()),
 		 Definition (resolved->get_node_id ()));
-
-  DefaultResolver::visit (s);
 }
 
 // needed because Late::visit (AST::GenericArg &) is non-virtual
