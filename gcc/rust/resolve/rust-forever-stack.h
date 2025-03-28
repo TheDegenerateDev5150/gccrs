@@ -548,6 +548,7 @@ template <Namespace N> class ForeverStack
 public:
   ForeverStack ()
     : root (Node (Rib (Rib::Kind::Normal), UNKNOWN_NODEID)),
+      lang_prelude (Node (Rib (Rib::Kind::Prelude), UNKNOWN_NODEID, root)),
       cursor_reference (root)
   {
     rust_assert (root.is_root ());
@@ -657,6 +658,8 @@ public:
    * the current map, an empty one otherwise.
    */
   tl::optional<Rib::Definition> get (const Identifier &name);
+  tl::optional<Rib::Definition> get_lang_prelude (const Identifier &name);
+  tl::optional<Rib::Definition> get_lang_prelude (const std::string &name);
 
   /**
    * Resolve a path to its definition in the current `ForeverStack`
@@ -721,6 +724,7 @@ private:
     {}
 
     bool is_root () const;
+    bool is_prelude () const;
     bool is_leaf () const;
 
     void insert_child (Link link, Node child);
@@ -756,7 +760,15 @@ private:
   const Node &cursor () const;
   void update_cursor (Node &new_cursor);
 
+  /* The forever stack's actual nodes */
   Node root;
+  /*
+   * A special prelude node used currently for resolving language builtins
+   * It has the root node as a parent, and acts as a "special case" for name
+   * resolution
+   */
+  Node lang_prelude;
+
   std::reference_wrapper<Node> cursor_reference;
 
   void stream_rib (std::stringstream &stream, const Rib &rib,
@@ -782,6 +794,10 @@ private:
     Node &starting_point, const std::vector<S> &segments,
     SegIterator<S> iterator,
     std::function<void (const S &, NodeId)> insert_segment_resolution);
+
+  tl::optional<Rib::Definition> resolve_final_segment (Node &final_node,
+						       std::string &seg_name,
+						       bool is_lower_self);
 
   /* Helper functions for forward resolution (to_canonical_path, to_rib...) */
   struct DfsResult

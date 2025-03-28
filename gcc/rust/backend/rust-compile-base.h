@@ -31,6 +31,12 @@ public:
 
   static tree address_expression (tree expr, location_t locus);
 
+  static tree compile_constant_expr (
+    Context *ctx, HirId coercion_id, TyTy::BaseType *resolved_type,
+    TyTy::BaseType *expected_type,
+    const Resolver::CanonicalPath &canonical_path, HIR::Expr &const_value_expr,
+    location_t locus, location_t expr_locus);
+
 protected:
   HIRCompileBase (Context *ctx) : ctx (ctx) {}
 
@@ -104,7 +110,7 @@ protected:
 			 const Resolver::CanonicalPath &canonical_path,
 			 TyTy::FnType *fntype);
 
-  static tree unit_expression (location_t locus);
+  tree unit_expression (location_t locus);
 
   void setup_fndecl (tree fndecl, bool is_main_entry_point, bool is_generic_fn,
 		     HIR::Visibility &visibility,

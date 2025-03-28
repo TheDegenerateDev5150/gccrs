@@ -232,6 +232,7 @@ TypeCheckItem::visit (HIR::TupleStruct &struct_decl)
     = parse_repr_options (attrs, struct_decl.get_locus ());
 
   auto *type = new TyTy::ADTType (
+    struct_decl.get_mappings ().get_defid (),
     struct_decl.get_mappings ().get_hirid (),
     struct_decl.get_mappings ().get_hirid (),
     struct_decl.get_identifier ().as_string (), ident,
@@ -314,6 +315,7 @@ TypeCheckItem::visit (HIR::StructStruct &struct_decl)
     = parse_repr_options (attrs, struct_decl.get_locus ());
 
   auto *type = new TyTy::ADTType (
+    struct_decl.get_mappings ().get_defid (),
     struct_decl.get_mappings ().get_hirid (),
     struct_decl.get_mappings ().get_hirid (),
     struct_decl.get_identifier ().as_string (), ident,
@@ -376,7 +378,8 @@ TypeCheckItem::visit (HIR::Enum &enum_decl)
 
   // multi variant ADT
   auto *type
-    = new TyTy::ADTType (enum_decl.get_mappings ().get_hirid (),
+    = new TyTy::ADTType (enum_decl.get_mappings ().get_defid (),
+			 enum_decl.get_mappings ().get_hirid (),
 			 enum_decl.get_mappings ().get_hirid (),
 			 enum_decl.get_identifier ().as_string (), ident,
 			 TyTy::ADTType::ADTKind::ENUM, std::move (variants),
@@ -447,7 +450,8 @@ TypeCheckItem::visit (HIR::Union &union_decl)
 			  std::move (fields)));
 
   auto *type
-    = new TyTy::ADTType (union_decl.get_mappings ().get_hirid (),
+    = new TyTy::ADTType (union_decl.get_mappings ().get_defid (),
+			 union_decl.get_mappings ().get_hirid (),
 			 union_decl.get_mappings ().get_hirid (),
 			 union_decl.get_identifier ().as_string (), ident,
 			 TyTy::ADTType::ADTKind::UNION, std::move (variants),
@@ -721,11 +725,11 @@ TypeCheckItem::resolve_impl_block_substitutions (HIR::ImplBlock &impl_block,
 
       // we don't error out here see: gcc/testsuite/rust/compile/traits2.rs
       // for example
-      specified_bound = get_predicate_from_bound (ref, impl_block.get_type ());
+      specified_bound = get_predicate_from_bound (ref, impl_block.get_type (),
+						  impl_block.get_polarity ());
     }
 
   TyTy::BaseType *self = TypeCheckType::Resolve (impl_block.get_type ());
-
   if (self->is<TyTy::ErrorType> ())
     {
       // we cannot check for unconstrained type arguments when the Self type is
@@ -767,7 +771,14 @@ TypeCheckItem::validate_trait_impl_block (
 
       // we don't error out here see: gcc/testsuite/rust/compile/traits2.rs
       // for example
-      specified_bound = get_predicate_from_bound (ref, impl_block.get_type ());
+      specified_bound = get_predicate_from_bound (ref, impl_block.get_type (),
+						  impl_block.get_polarity ());
+
+      // need to check that if this specified bound has super traits does this
+      // Self
+      // implement them?
+      specified_bound.validate_type_implements_super_traits (
+	*self, impl_block.get_type (), impl_block.get_trait_ref ());
     }
 
   bool is_trait_impl_block = !trait_reference->is_error ();

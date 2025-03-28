@@ -1932,7 +1932,9 @@ Dump::visit (TraitItemConst &e)
 
   put_field ("name", e.get_name ().as_string ());
   visit_field ("type", e.get_type ());
-  visit_field ("expr", e.get_expr ());
+  if (e.has_expr ())
+    visit_field ("expr", e.get_expr ());
+
   end ("TraitItemConst");
 }
 
@@ -2438,7 +2440,9 @@ Dump::visit (BareFunctionType &e)
       end_field ("params");
     }
 
-  visit_field ("return_type", e.get_return_type ());
+  if (e.has_return_type ())
+    visit_field ("return_type", e.get_return_type ());
+
   put_field ("is_variadic", std::to_string (e.get_is_variadic ()));
   end ("BareFunctionType");
 }

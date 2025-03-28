@@ -107,6 +107,16 @@ TraitResolver::Lookup (HIR::TypePath &path)
   return resolver.lookup_path (path);
 }
 
+HIR::Trait *
+TraitResolver::ResolveHirItem (const HIR::TypePath &path)
+{
+  TraitResolver resolver;
+
+  HIR::Trait *lookup = nullptr;
+  bool ok = resolver.resolve_path_to_trait (path, &lookup);
+  return ok ? lookup : nullptr;
+}
+
 TraitResolver::TraitResolver () : TypeCheckBase () {}
 
 bool
@@ -256,7 +266,7 @@ TraitResolver::resolve_trait (HIR::Trait *trait_reference)
   specified_bounds.push_back (self_hrtb);
 
   // look for any
-  std::vector<const TraitReference *> super_traits;
+  std::vector<TyTy::TypeBoundPredicate> super_traits;
   if (trait_reference->has_type_param_bounds ())
     {
       for (auto &bound : trait_reference->get_type_param_bounds ())
@@ -274,7 +284,7 @@ TraitResolver::resolve_trait (HIR::Trait *trait_reference)
 		return &TraitReference::error_node ();
 
 	      specified_bounds.push_back (predicate);
-	      super_traits.push_back (predicate.get ());
+	      super_traits.push_back (predicate);
 	    }
 	}
     }
@@ -295,8 +305,7 @@ TraitResolver::resolve_trait (HIR::Trait *trait_reference)
       item_refs.push_back (std::move (trait_item_ref));
     }
 
-  TraitReference trait_object (trait_reference, item_refs,
-			       std::move (super_traits),
+  TraitReference trait_object (trait_reference, item_refs, super_traits,
 			       std::move (substitutions));
   context->insert_trait_reference (
     trait_reference->get_mappings ().get_defid (), std::move (trait_object));
@@ -476,7 +485,7 @@ AssociatedImplTrait::setup_raw_associated_types ()
 TyTy::BaseType *
 AssociatedImplTrait::setup_associated_types (
   const TyTy::BaseType *self, const TyTy::TypeBoundPredicate &bound,
-  TyTy::SubstitutionArgumentMappings *args)
+  TyTy::SubstitutionArgumentMappings *args, bool infer)
 {
   // compute the constrained impl block generic arguments based on self and the
   // higher ranked trait bound
@@ -536,7 +545,7 @@ AssociatedImplTrait::setup_associated_types (
   std::vector<TyTy::SubstitutionArg> subst_args;
   for (auto &p : substitutions)
     {
-      if (p.needs_substitution ())
+      if (p.needs_substitution () && infer)
 	{
 	  TyTy::TyVar infer_var = TyTy::TyVar::get_implicit_infer_var (locus);
 	  subst_args.push_back (
@@ -610,7 +619,7 @@ AssociatedImplTrait::setup_associated_types (
 	= unify_site_and (a->get_ref (), TyTy::TyWithLocation (a),
 			  TyTy::TyWithLocation (b), impl_predicate.get_locus (),
 			  true /*emit-errors*/, true /*commit-if-ok*/,
-			  false /*infer*/, true /*cleanup-on-fail*/);
+			  true /*infer*/, true /*cleanup-on-fail*/);
       rust_assert (result->get_kind () != TyTy::TypeKind::ERROR);
     }
 
@@ -623,7 +632,7 @@ AssociatedImplTrait::setup_associated_types (
 				TyTy::TyWithLocation (impl_self_infer),
 				impl_predicate.get_locus (),
 				true /*emit-errors*/, true /*commit-if-ok*/,
-				false /*infer*/, true /*cleanup-on-fail*/);
+				true /*infer*/, true /*cleanup-on-fail*/);
   rust_assert (result->get_kind () != TyTy::TypeKind::ERROR);
   TyTy::BaseType *self_result = result;
 

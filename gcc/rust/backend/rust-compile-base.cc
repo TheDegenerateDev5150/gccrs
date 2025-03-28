@@ -561,6 +561,18 @@ HIRCompileBase::address_expression (tree expr, location_t location)
 }
 
 tree
+HIRCompileBase::compile_constant_expr (
+  Context *ctx, HirId coercion_id, TyTy::BaseType *resolved_type,
+  TyTy::BaseType *expected_type, const Resolver::CanonicalPath &canonical_path,
+  HIR::Expr &const_value_expr, location_t locus, location_t expr_locus)
+{
+  HIRCompileBase c (ctx);
+  return c.compile_constant_item (coercion_id, resolved_type, expected_type,
+				  canonical_path, const_value_expr, locus,
+				  expr_locus);
+}
+
+tree
 HIRCompileBase::indirect_expression (tree expr, location_t locus)
 {
   if (expr == error_mark_node)
@@ -1011,7 +1023,7 @@ HIRCompileBase::resolve_method_address (TyTy::FnType *fntype,
 tree
 HIRCompileBase::unit_expression (location_t locus)
 {
-  tree unit_type = TyTyResolveCompile::get_unit_type ();
+  tree unit_type = TyTyResolveCompile::get_unit_type (ctx);
   return Backend::constructor_expression (unit_type, false, {}, -1, locus);
 }
 

@@ -545,6 +545,8 @@ public:
   void apply_generic_arguments (HIR::GenericArgs *generic_args,
 				bool has_associated_self);
 
+  void apply_argument_mappings (SubstitutionArgumentMappings &arguments);
+
   bool contains_item (const std::string &search) const;
 
   TypeBoundPredicateItem
@@ -576,6 +578,14 @@ public:
 
   bool is_equal (const TypeBoundPredicate &other) const;
 
+  bool validate_type_implements_super_traits (TyTy::BaseType &self,
+					      HIR::Type &impl_type,
+					      HIR::Type &trait) const;
+
+  bool validate_type_implements_this (TyTy::BaseType &self,
+				      HIR::Type &impl_type,
+				      HIR::Type &trait) const;
+
 private:
   struct mark_is_error
   {
@@ -587,6 +597,36 @@ private:
   location_t locus;
   bool error_flag;
   BoundPolarity polarity;
+  std::vector<TyTy::TypeBoundPredicate> super_traits;
+};
+
+class TypeBoundPredicateItem
+{
+public:
+  TypeBoundPredicateItem (const TypeBoundPredicate parent,
+			  const Resolver::TraitItemReference *trait_item_ref);
+
+  TypeBoundPredicateItem (const TypeBoundPredicateItem &other);
+
+  TypeBoundPredicateItem &operator= (const TypeBoundPredicateItem &other);
+
+  static TypeBoundPredicateItem error ();
+
+  bool is_error () const;
+
+  BaseType *get_tyty_for_receiver (const TyTy::BaseType *receiver);
+
+  const Resolver::TraitItemReference *get_raw_item () const;
+
+  bool needs_implementation () const;
+
+  const TypeBoundPredicate *get_parent () const;
+
+  location_t get_locus () const;
+
+private:
+  TypeBoundPredicate parent;
+  const Resolver::TraitItemReference *trait_item_ref;
 };
 
 // https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.VariantDef.html
@@ -686,45 +726,31 @@ public:
     BaseType *repr = nullptr;
   };
 
-  ADTType (HirId ref, std::string identifier, RustIdent ident, ADTKind adt_kind,
+  ADTType (DefId id, HirId ref, std::string identifier, RustIdent ident,
+	   ADTKind adt_kind, std::vector<VariantDef *> variants,
+	   std::vector<SubstitutionParamMapping> subst_refs,
+	   SubstitutionArgumentMappings generic_arguments
+	   = SubstitutionArgumentMappings::error (),
+	   RegionConstraints region_constraints = RegionConstraints{},
+	   std::set<HirId> refs = std::set<HirId> ());
+
+  ADTType (DefId id, HirId ref, HirId ty_ref, std::string identifier,
+	   RustIdent ident, ADTKind adt_kind,
 	   std::vector<VariantDef *> variants,
 	   std::vector<SubstitutionParamMapping> subst_refs,
 	   SubstitutionArgumentMappings generic_arguments
 	   = SubstitutionArgumentMappings::error (),
 	   RegionConstraints region_constraints = RegionConstraints{},
-	   std::set<HirId> refs = std::set<HirId> ())
-    : BaseType (ref, ref, TypeKind::ADT, ident, refs),
-      SubstitutionRef (std::move (subst_refs), std::move (generic_arguments),
-		       region_constraints),
-      identifier (identifier), variants (variants), adt_kind (adt_kind)
-  {}
+	   std::set<HirId> refs = std::set<HirId> ());
 
-  ADTType (HirId ref, HirId ty_ref, std::string identifier, RustIdent ident,
-	   ADTKind adt_kind, std::vector<VariantDef *> variants,
-	   std::vector<SubstitutionParamMapping> subst_refs,
-	   SubstitutionArgumentMappings generic_arguments
-	   = SubstitutionArgumentMappings::error (),
-	   RegionConstraints region_constraints = RegionConstraints{},
-	   std::set<HirId> refs = std::set<HirId> ())
-    : BaseType (ref, ty_ref, TypeKind::ADT, ident, refs),
-      SubstitutionRef (std::move (subst_refs), std::move (generic_arguments),
-		       region_constraints),
-      identifier (identifier), variants (variants), adt_kind (adt_kind)
-  {}
-
-  ADTType (HirId ref, HirId ty_ref, std::string identifier, RustIdent ident,
-	   ADTKind adt_kind, std::vector<VariantDef *> variants,
+  ADTType (DefId id, HirId ref, HirId ty_ref, std::string identifier,
+	   RustIdent ident, ADTKind adt_kind,
+	   std::vector<VariantDef *> variants,
 	   std::vector<SubstitutionParamMapping> subst_refs, ReprOptions repr,
 	   SubstitutionArgumentMappings generic_arguments
 	   = SubstitutionArgumentMappings::error (),
 	   RegionConstraints region_constraints = RegionConstraints{},
-	   std::set<HirId> refs = std::set<HirId> ())
-    : BaseType (ref, ty_ref, TypeKind::ADT, ident, refs),
-      SubstitutionRef (std::move (subst_refs), std::move (generic_arguments),
-		       region_constraints),
-      identifier (identifier), variants (variants), adt_kind (adt_kind),
-      repr (repr)
-  {}
+	   std::set<HirId> refs = std::set<HirId> ());
 
   ADTKind get_adt_kind () const { return adt_kind; }
 
@@ -754,6 +780,8 @@ public:
   {
     return identifier + subst_as_string ();
   }
+
+  DefId get_id () const;
 
   BaseType *clone () const final override;
 
@@ -800,6 +828,7 @@ public:
   handle_substitions (SubstitutionArgumentMappings &mappings) override final;
 
 private:
+  DefId id;
   std::string identifier;
   std::vector<VariantDef *> variants;
   ADTType::ADTKind adt_kind;

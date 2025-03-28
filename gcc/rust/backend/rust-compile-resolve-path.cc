@@ -32,6 +32,22 @@
 namespace Rust {
 namespace Compile {
 
+tree
+ResolvePathRef::Compile (HIR::QualifiedPathInExpression &expr, Context *ctx)
+{
+  ResolvePathRef resolver (ctx);
+  return resolver.resolve_path_like (expr);
+}
+
+tree
+ResolvePathRef::Compile (HIR::PathInExpression &expr, Context *ctx)
+{
+  ResolvePathRef resolver (ctx);
+  return resolver.resolve_path_like (expr);
+}
+
+ResolvePathRef::ResolvePathRef (Context *ctx) : HIRCompileBase (ctx) {}
+
 template <typename T>
 tree
 ResolvePathRef::resolve_path_like (T &expr)
@@ -51,18 +67,6 @@ ResolvePathRef::resolve_path_like (T &expr)
 
   return resolve (expr.get_final_segment ().get_segment (),
 		  expr.get_mappings (), expr.get_locus (), true);
-}
-
-void
-ResolvePathRef::visit (HIR::QualifiedPathInExpression &expr)
-{
-  resolved = resolve_path_like (expr);
-}
-
-void
-ResolvePathRef::visit (HIR::PathInExpression &expr)
-{
-  resolved = resolve_path_like (expr);
 }
 
 tree
@@ -296,6 +300,27 @@ HIRCompileBase::query_compile (HirId ref, TyTy::BaseType *lookup,
 	  bool ok = ctx->get_tyctx ()->lookup_trait_reference (
 	    trait->get_mappings ().get_defid (), &trait_ref);
 	  rust_assert (ok);
+
+	  if (trait_item.value ()->get_item_kind ()
+	      == HIR::TraitItem::TraitItemKind::CONST)
+	    {
+	      auto &c
+		= *static_cast<HIR::TraitItemConst *> (trait_item.value ());
+	      if (!c.has_expr ())
+		{
+		  rich_location r (line_table, expr_locus);
+		  r.add_range (trait->get_locus ());
+		  r.add_range (c.get_locus ());
+		  rust_error_at (r, "no default expression on trait constant");
+		  return error_mark_node;
+		}
+
+	      return CompileExpr::Compile (c.get_expr (), ctx);
+	    }
+
+	  if (trait_item.value ()->get_item_kind ()
+	      != HIR::TraitItem::TraitItemKind::FUNC)
+	    return error_mark_node;
 
 	  // the type resolver can only resolve type bounds to their trait
 	  // item so its up to us to figure out if this path should resolve

@@ -68,8 +68,8 @@ ResolvePath::resolve_path (AST::PathInExpression &expr)
       if (in_middle_of_path && segment.is_lower_self_seg ())
 	{
 	  rust_error_at (segment.get_locus (), ErrorCode::E0433,
-			 "failed to resolve: %<%s%> in paths can only be used "
-			 "in start position",
+			 "leading path segment %qs can only be used at the "
+			 "beginning of a path",
 			 segment.as_string ().c_str ());
 	  return UNKNOWN_NODEID;
 	}
@@ -80,8 +80,16 @@ ResolvePath::resolve_path (AST::PathInExpression &expr)
 	  // what is the current crate scope node id?
 	  module_scope_id = crate_scope_id;
 	  previous_resolved_node_id = module_scope_id;
-	  resolver->insert_resolved_name (segment.get_node_id (),
-					  module_scope_id);
+
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+						    &existing);
+
+	  if (ok)
+	    rust_assert (existing == module_scope_id);
+	  else
+	    resolver->insert_resolved_name (segment.get_node_id (),
+					    module_scope_id);
 	  continue;
 	}
       else if (segment.is_super_path_seg ())
@@ -95,8 +103,16 @@ ResolvePath::resolve_path (AST::PathInExpression &expr)
 
 	  module_scope_id = resolver->peek_parent_module_scope ();
 	  previous_resolved_node_id = module_scope_id;
-	  resolver->insert_resolved_name (segment.get_node_id (),
-					  module_scope_id);
+
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+						    &existing);
+
+	  if (ok)
+	    rust_assert (existing == module_scope_id);
+	  else
+	    resolver->insert_resolved_name (segment.get_node_id (),
+					    module_scope_id);
 	  continue;
 	}
 
@@ -140,23 +156,45 @@ ResolvePath::resolve_path (AST::PathInExpression &expr)
 				      ident_seg.as_string ());
 	  if (resolver->get_name_scope ().lookup (path, &resolved_node))
 	    {
-	      resolver->insert_resolved_name (segment.get_node_id (),
-					      resolved_node);
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == resolved_node);
+	      else
+		resolver->insert_resolved_name (segment.get_node_id (),
+						resolved_node);
 	      resolved_node_id = resolved_node;
 	    }
 	  // check the type scope
 	  else if (resolver->get_type_scope ().lookup (path, &resolved_node))
 	    {
-	      resolver->insert_resolved_type (segment.get_node_id (),
-					      resolved_node);
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_type (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == resolved_node);
+	      else
+		resolver->insert_resolved_type (segment.get_node_id (),
+						resolved_node);
 	      resolved_node_id = resolved_node;
 	    }
 	  else if (segment.is_lower_self_seg ())
 	    {
 	      module_scope_id = crate_scope_id;
 	      previous_resolved_node_id = module_scope_id;
-	      resolver->insert_resolved_name (segment.get_node_id (),
-					      module_scope_id);
+
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == module_scope_id);
+	      else
+		resolver->insert_resolved_name (segment.get_node_id (),
+						module_scope_id);
 	      continue;
 	    }
 	  else
@@ -179,15 +217,33 @@ ResolvePath::resolve_path (AST::PathInExpression &expr)
 		    resolved_node))
 		{
 		  resolved_node_id = resolved_node;
-		  resolver->insert_resolved_name (segment.get_node_id (),
-						  resolved_node);
+
+		  NodeId existing = UNKNOWN_NODEID;
+		  bool ok
+		    = resolver->lookup_resolved_name (segment.get_node_id (),
+						      &existing);
+
+		  if (ok)
+		    rust_assert (existing == resolved_node);
+		  else
+		    resolver->insert_resolved_name (segment.get_node_id (),
+						    resolved_node);
 		}
 	      else if (resolver->get_type_scope ().decl_was_declared_here (
 			 resolved_node))
 		{
 		  resolved_node_id = resolved_node;
-		  resolver->insert_resolved_type (segment.get_node_id (),
-						  resolved_node);
+
+		  NodeId existing = UNKNOWN_NODEID;
+		  bool ok
+		    = resolver->lookup_resolved_type (segment.get_node_id (),
+						      &existing);
+
+		  if (ok)
+		    rust_assert (existing == resolved_node);
+		  else
+		    resolver->insert_resolved_type (segment.get_node_id (),
+						    resolved_node);
 		}
 	      else
 		{
@@ -224,15 +280,29 @@ ResolvePath::resolve_path (AST::PathInExpression &expr)
       // name scope first
       if (resolver->get_name_scope ().decl_was_declared_here (resolved_node_id))
 	{
-	  resolver->insert_resolved_name (expr.get_node_id (),
-					  resolved_node_id);
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok
+	    = resolver->lookup_resolved_name (expr.get_node_id (), &existing);
+
+	  if (ok)
+	    rust_assert (existing == resolved_node_id);
+	  else
+	    resolver->insert_resolved_name (expr.get_node_id (),
+					    resolved_node_id);
 	}
       // check the type scope
       else if (resolver->get_type_scope ().decl_was_declared_here (
 		 resolved_node_id))
 	{
-	  resolver->insert_resolved_type (expr.get_node_id (),
-					  resolved_node_id);
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok
+	    = resolver->lookup_resolved_type (expr.get_node_id (), &existing);
+
+	  if (ok)
+	    rust_assert (existing == resolved_node_id);
+	  else
+	    resolver->insert_resolved_type (expr.get_node_id (),
+					    resolved_node_id);
 	}
       else
 	{
@@ -284,14 +354,28 @@ ResolvePath::resolve_path (AST::SimplePath &expr)
 	  // what is the current crate scope node id?
 	  module_scope_id = crate_scope_id;
 	  previous_resolved_node_id = module_scope_id;
-	  resolver->insert_resolved_name (segment.get_node_id (),
-					  module_scope_id);
+
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+						    &existing);
+
+	  if (ok)
+	    rust_assert (existing == module_scope_id);
+	  else
+	    resolver->insert_resolved_name (segment.get_node_id (),
+					    module_scope_id);
 	  resolved_node_id = module_scope_id;
 
 	  continue;
 	}
       else if (segment.is_super_path_seg ())
 	{
+	  if (!is_first_segment)
+	    {
+	      rust_error_at (segment.get_locus (),
+			     "%<super%> can only be used in start position");
+	      return UNKNOWN_NODEID;
+	    }
 	  if (module_scope_id == crate_scope_id)
 	    {
 	      rust_error_at (segment.get_locus (),
@@ -301,8 +385,16 @@ ResolvePath::resolve_path (AST::SimplePath &expr)
 
 	  module_scope_id = resolver->peek_parent_module_scope ();
 	  previous_resolved_node_id = module_scope_id;
-	  resolver->insert_resolved_name (segment.get_node_id (),
-					  module_scope_id);
+
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+						    &existing);
+
+	  if (ok)
+	    rust_assert (existing == module_scope_id);
+	  else
+	    resolver->insert_resolved_name (segment.get_node_id (),
+					    module_scope_id);
 	  resolved_node_id = module_scope_id;
 
 	  continue;
@@ -318,15 +410,31 @@ ResolvePath::resolve_path (AST::SimplePath &expr)
 		resolved_node))
 	    {
 	      resolved_node_id = resolved_node;
-	      resolver->insert_resolved_name (segment.get_node_id (),
-					      resolved_node);
+
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == resolved_node);
+	      else
+		resolver->insert_resolved_name (segment.get_node_id (),
+						resolved_node);
 	    }
 	  else if (resolver->get_type_scope ().decl_was_declared_here (
 		     resolved_node))
 	    {
 	      resolved_node_id = resolved_node;
-	      resolver->insert_resolved_type (segment.get_node_id (),
-					      resolved_node);
+
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_type (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == resolved_node);
+	      else
+		resolver->insert_resolved_type (segment.get_node_id (),
+						resolved_node);
 	    }
 	  else
 	    {
@@ -347,15 +455,31 @@ ResolvePath::resolve_path (AST::SimplePath &expr)
 	  if (resolver->get_name_scope ().lookup (path, &resolved_node))
 	    {
 	      resolved_node_id = resolved_node;
-	      resolver->insert_resolved_name (segment.get_node_id (),
-					      resolved_node);
+
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_name (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == resolved_node);
+	      else
+		resolver->insert_resolved_name (segment.get_node_id (),
+						resolved_node);
 	    }
 	  // check the type scope
 	  else if (resolver->get_type_scope ().lookup (path, &resolved_node))
 	    {
 	      resolved_node_id = resolved_node;
-	      resolver->insert_resolved_type (segment.get_node_id (),
-					      resolved_node);
+
+	      NodeId existing = UNKNOWN_NODEID;
+	      bool ok = resolver->lookup_resolved_type (segment.get_node_id (),
+							&existing);
+
+	      if (ok)
+		rust_assert (existing == resolved_node);
+	      else
+		resolver->insert_resolved_type (segment.get_node_id (),
+						resolved_node);
 	    }
 	}
 
@@ -398,15 +522,29 @@ ResolvePath::resolve_path (AST::SimplePath &expr)
       // name scope first
       if (resolver->get_name_scope ().decl_was_declared_here (resolved_node_id))
 	{
-	  resolver->insert_resolved_name (expr.get_node_id (),
-					  resolved_node_id);
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok
+	    = resolver->lookup_resolved_name (expr.get_node_id (), &existing);
+
+	  if (ok)
+	    rust_assert (existing == resolved_node_id);
+	  else
+	    resolver->insert_resolved_name (expr.get_node_id (),
+					    resolved_node_id);
 	}
       // check the type scope
       else if (resolver->get_type_scope ().decl_was_declared_here (
 		 resolved_node_id))
 	{
-	  resolver->insert_resolved_type (expr.get_node_id (),
-					  resolved_node_id);
+	  NodeId existing = UNKNOWN_NODEID;
+	  bool ok
+	    = resolver->lookup_resolved_type (expr.get_node_id (), &existing);
+
+	  if (ok)
+	    rust_assert (existing == resolved_node_id);
+	  else
+	    resolver->insert_resolved_type (expr.get_node_id (),
+					    resolved_node_id);
 	}
       else
 	{
