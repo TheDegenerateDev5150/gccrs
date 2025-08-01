@@ -33,6 +33,8 @@
 #include "rust-type-util.h"
 #include "rust-immutable-name-resolution-context.h"
 #include "rust-compile-base.h"
+#include "rust-tyty-util.h"
+#include "tree.h"
 
 namespace Rust {
 namespace Resolver {
@@ -661,11 +663,22 @@ TypeCheckExpr::visit (HIR::BlockExpr &expr)
 void
 TypeCheckExpr::visit (HIR::AnonConst &expr)
 {
-  // FIXME: How do we typecheck a deferred inference const?
+  if (!expr.is_deferred ())
+    {
+      infered = TypeCheckExpr::Resolve (expr.get_inner_expr ());
+      return;
+    }
 
-  rust_assert (!expr.is_deferred ());
+  auto locus = expr.get_locus ();
+  auto infer_ty_var = TyTy::TyVar::get_implicit_infer_var (locus);
 
-  infered = TypeCheckExpr::Resolve (expr.get_inner_expr ());
+  HirId next = mappings.get_next_hir_id ();
+  infered = new TyTy::ConstType (TyTy::ConstType::ConstKind::Infer, "",
+				 infer_ty_var.get_tyty (), error_mark_node, {},
+				 locus, next, next, {});
+
+  context->insert_implicit_type (infered->get_ref (), infered);
+  mappings.insert_location (infered->get_ref (), locus);
 }
 
 void
@@ -1058,6 +1071,10 @@ TypeCheckExpr::visit (HIR::ArrayExpr &expr)
 {
   auto &elements = expr.get_internal_elements ();
 
+  TyTy::BaseType *expected_ty = nullptr;
+  bool ok = context->lookup_builtin ("usize", &expected_ty);
+  rust_assert (ok);
+
   HIR::Expr *capacity_expr = nullptr;
   TyTy::BaseType *element_type = nullptr;
   TyTy::BaseType *capacity_type = nullptr;
@@ -1072,9 +1089,6 @@ TypeCheckExpr::visit (HIR::ArrayExpr &expr)
 	auto capacity_expr_ty
 	  = TypeCheckExpr::Resolve (elems.get_num_copies_expr ());
 
-	TyTy::BaseType *expected_ty = nullptr;
-	bool ok = context->lookup_builtin ("usize", &expected_ty);
-	rust_assert (ok);
 	context->insert_type (elems.get_num_copies_expr ().get_mappings (),
 			      expected_ty);
 
@@ -1123,9 +1137,6 @@ TypeCheckExpr::visit (HIR::ArrayExpr &expr)
 					      UNDEF_LOCATION, {});
 
 	// mark the type for this implicit node
-	TyTy::BaseType *expected_ty = nullptr;
-	bool ok = context->lookup_builtin ("usize", &expected_ty);
-	rust_assert (ok);
 	context->insert_type (mapping, expected_ty);
 	capacity_type = expected_ty;
       }
@@ -1135,12 +1146,17 @@ TypeCheckExpr::visit (HIR::ArrayExpr &expr)
   rust_assert (capacity_expr);
   rust_assert (capacity_type);
   auto ctx = Compile::Context::get ();
-  tree capacity
+  tree capacity_value
     = Compile::HIRCompileBase::query_compile_const_expr (ctx, capacity_type,
 							 *capacity_expr);
+  HirId size_id = capacity_expr->get_mappings ().get_hirid ();
+  TyTy::ConstType *const_type
+    = new TyTy::ConstType (TyTy::ConstType::ConstKind::Value, "", expected_ty,
+			   capacity_value, {}, capacity_expr->get_locus (),
+			   size_id, size_id);
   infered
     = new TyTy::ArrayType (expr.get_mappings ().get_hirid (), expr.get_locus (),
-			   capacity, TyTy::TyVar (element_type->get_ref ()));
+			   const_type, TyTy::TyVar (element_type->get_ref ()));
 }
 
 // empty struct

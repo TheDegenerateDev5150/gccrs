@@ -18,11 +18,14 @@
 
 #include "rust-hir-type-check-base.h"
 #include "rust-compile-base.h"
+#include "rust-hir-item.h"
 #include "rust-hir-type-check-expr.h"
 #include "rust-hir-type-check-type.h"
 #include "rust-hir-trait-resolve.h"
 #include "rust-type-util.h"
 #include "rust-attribute-values.h"
+#include "rust-tyty.h"
+#include "tree.h"
 
 namespace Rust {
 namespace Resolver {
@@ -33,12 +36,14 @@ TypeCheckBase::TypeCheckBase ()
 
 void
 TypeCheckBase::ResolveGenericParams (
+  const HIR::Item::ItemKind item_kind, location_t item_locus,
   const std::vector<std::unique_ptr<HIR::GenericParam>> &generic_params,
   std::vector<TyTy::SubstitutionParamMapping> &substitutions, bool is_foreign,
   ABI abi)
 {
   TypeCheckBase ctx;
-  ctx.resolve_generic_params (generic_params, substitutions, is_foreign, abi);
+  ctx.resolve_generic_params (item_kind, item_locus, generic_params,
+			      substitutions, is_foreign, abi);
 }
 
 static void
@@ -290,9 +295,18 @@ TypeCheckBase::resolve_literal (const Analysis::NodeMapping &expr_mappings,
 	auto ctx = Compile::Context::get ();
 	tree capacity = Compile::HIRCompileBase::query_compile_const_expr (
 	  ctx, expected_ty, *literal_capacity);
+
+	TyTy::ConstType *capacity_expr
+	  = new TyTy::ConstType (TyTy::ConstType::ConstKind::Value, "",
+				 expected_ty, capacity, {},
+				 literal_capacity->get_locus (),
+				 literal_capacity->get_mappings ().get_hirid (),
+				 literal_capacity->get_mappings ().get_hirid (),
+				 {});
+
 	TyTy::ArrayType *array
-	  = new TyTy::ArrayType (array_mapping.get_hirid (), locus, capacity,
-				 TyTy::TyVar (u8->get_ref ()));
+	  = new TyTy::ArrayType (array_mapping.get_hirid (), locus,
+				 capacity_expr, TyTy::TyVar (u8->get_ref ()));
 	context->insert_type (array_mapping, array);
 
 	infered = new TyTy::ReferenceType (expr_mappings.get_hirid (),
@@ -441,6 +455,7 @@ TypeCheckBase::parse_repr_options (const AST::AttrVec &attrs, location_t locus)
 
 void
 TypeCheckBase::resolve_generic_params (
+  const HIR::Item::ItemKind item_kind, location_t item_locus,
   const std::vector<std::unique_ptr<HIR::GenericParam>> &generic_params,
   std::vector<TyTy::SubstitutionParamMapping> &substitutions, bool is_foreign,
   ABI abi)
@@ -473,6 +488,27 @@ TypeCheckBase::resolve_generic_params (
 
 	    if (param.has_default_expression ())
 	      {
+		switch (item_kind)
+		  {
+		  case HIR::Item::ItemKind::Struct:
+		  case HIR::Item::ItemKind::Enum:
+		  case HIR::Item::ItemKind::TypeAlias:
+		  case HIR::Item::ItemKind::Trait:
+		  case HIR::Item::ItemKind::Union:
+		    break;
+
+		  default:
+		    {
+		      rich_location r (line_table, item_locus);
+		      r.add_fixit_remove (param.get_locus ());
+		      rust_error_at (
+			r,
+			"default values for const generic parameters are not "
+			"allowed here");
+		    }
+		    break;
+		  }
+
 		auto expr_type
 		  = TypeCheckExpr::Resolve (param.get_default_expression ());
 
@@ -482,10 +518,34 @@ TypeCheckBase::resolve_generic_params (
 				 expr_type,
 				 param.get_default_expression ().get_locus ()),
 			       param.get_locus ());
+
+		// fold the default value
+		auto ctx = Compile::Context::get ();
+		auto &expr = param.get_default_expression ();
+		tree default_value
+		  = Compile::HIRCompileBase::query_compile_const_expr (
+		    ctx, specified_type, expr);
+
+		TyTy::ConstType *default_const_decl
+		  = new TyTy::ConstType (TyTy::ConstType::ConstKind::Value,
+					 param.get_name (), specified_type,
+					 default_value, {}, param.get_locus (),
+					 expr.get_mappings ().get_hirid (),
+					 expr.get_mappings ().get_hirid (), {});
+
+		context->insert_type (expr.get_mappings (), default_const_decl);
 	      }
 
-	    context->insert_type (generic_param->get_mappings (),
-				  specified_type);
+	    TyTy::ConstType *const_decl
+	      = new TyTy::ConstType (TyTy::ConstType::ConstKind::Decl,
+				     param.get_name (), specified_type,
+				     error_mark_node, {}, param.get_locus (),
+				     param.get_mappings ().get_hirid (),
+				     param.get_mappings ().get_hirid (), {});
+
+	    context->insert_type (generic_param->get_mappings (), const_decl);
+	    TyTy::SubstitutionParamMapping p (*generic_param, const_decl);
+	    substitutions.push_back (p);
 	  }
 	  break;
 
@@ -501,8 +561,7 @@ TypeCheckBase::resolve_generic_params (
 	      *generic_param, false /*resolve_trait_bounds*/);
 	    context->insert_type (generic_param->get_mappings (), param_type);
 
-	    auto &param = static_cast<HIR::TypeParam &> (*generic_param);
-	    TyTy::SubstitutionParamMapping p (param, param_type);
+	    TyTy::SubstitutionParamMapping p (*generic_param, param_type);
 	    substitutions.push_back (p);
 	  }
 	  break;
@@ -512,9 +571,16 @@ TypeCheckBase::resolve_generic_params (
   // now walk them to setup any specified type param bounds
   for (auto &subst : substitutions)
     {
-      auto pty = subst.get_param_ty ();
-      TypeResolveGenericParam::ApplyAnyTraitBounds (subst.get_generic_param (),
-						    pty);
+      auto &generic = subst.get_generic_param ();
+      if (generic.get_kind () != HIR::GenericParam::GenericKind::TYPE)
+	continue;
+
+      auto &type_param = static_cast<HIR::TypeParam &> (generic);
+      auto bpty = subst.get_param_ty ();
+      rust_assert (bpty->get_kind () == TyTy::TypeKind::PARAM);
+      auto pty = static_cast<TyTy::ParamType *> (bpty);
+
+      TypeResolveGenericParam::ApplyAnyTraitBounds (type_param, pty);
     }
 }
 

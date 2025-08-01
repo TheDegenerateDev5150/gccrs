@@ -19,6 +19,7 @@
 #ifndef RUST_TYTY
 #define RUST_TYTY
 
+#include "optional.h"
 #include "rust-hir-map.h"
 #include "rust-common.h"
 #include "rust-identifier.h"
@@ -57,6 +58,7 @@ enum TypeKind
   REF,
   POINTER,
   PARAM,
+  CONST,
   ARRAY,
   SLICE,
   FNDEF,
@@ -365,18 +367,34 @@ public:
   std::string get_name () const override final;
 };
 
-class ParamType : public BaseType
+class BaseGeneric : public BaseType
+{
+public:
+  virtual std::string get_symbol () const = 0;
+
+  virtual bool can_resolve () const = 0;
+
+  virtual BaseType *resolve () const = 0;
+
+protected:
+  BaseGeneric (HirId ref, HirId ty_ref, TypeKind kind, RustIdent ident,
+	       std::vector<TypeBoundPredicate> specified_bounds,
+	       std::set<HirId> refs = std::set<HirId> ())
+    : BaseType (ref, ty_ref, kind, ident, specified_bounds, refs)
+  {}
+};
+
+class ParamType : public BaseGeneric
 {
 public:
   static constexpr auto KIND = TypeKind::PARAM;
 
   ParamType (std::string symbol, location_t locus, HirId ref,
-	     HIR::GenericParam &param,
 	     std::vector<TypeBoundPredicate> specified_bounds,
 	     std::set<HirId> refs = std::set<HirId> ());
 
   ParamType (bool is_trait_self, std::string symbol, location_t locus,
-	     HirId ref, HirId ty_ref, HIR::GenericParam &param,
+	     HirId ref, HirId ty_ref,
 	     std::vector<TypeBoundPredicate> specified_bounds,
 	     std::set<HirId> refs = std::set<HirId> ());
 
@@ -389,13 +407,11 @@ public:
 
   BaseType *clone () const final override;
 
-  std::string get_symbol () const;
+  std::string get_symbol () const override final;
 
-  HIR::GenericParam &get_generic_param ();
+  bool can_resolve () const override final;
 
-  bool can_resolve () const;
-
-  BaseType *resolve () const;
+  BaseType *resolve () const override final;
 
   std::string get_name () const override final;
 
@@ -409,7 +425,58 @@ public:
 private:
   bool is_trait_self;
   std::string symbol;
-  HIR::GenericParam &param;
+};
+
+class ConstType : public BaseGeneric
+{
+public:
+  static constexpr auto KIND = TypeKind::CONST;
+
+  enum ConstKind
+  {
+    Decl,
+    Value,
+    Infer,
+    Error
+  };
+
+  ConstType (ConstKind kind, std::string symbol, TyTy::BaseType *ty, tree value,
+	     std::vector<TypeBoundPredicate> specified_bounds, location_t locus,
+	     HirId ref, HirId ty_ref,
+	     std::set<HirId> refs = std::set<HirId> ());
+
+  void accept_vis (TyVisitor &vis) override;
+  void accept_vis (TyConstVisitor &vis) const override;
+
+  ConstKind get_const_kind () const { return const_kind; }
+  TyTy::BaseType *get_ty () const { return ty; }
+  tree get_value () const { return value; }
+
+  void set_value (tree value);
+
+  std::string as_string () const override;
+
+  bool can_eq (const BaseType *other, bool emit_errors) const override final;
+
+  BaseType *clone () const final override;
+
+  std::string get_symbol () const override final;
+
+  bool can_resolve () const override final;
+
+  BaseType *resolve () const override final;
+
+  std::string get_name () const override final;
+
+  bool is_equal (const BaseType &other) const override;
+
+  ConstType *handle_substitions (SubstitutionArgumentMappings &mappings);
+
+private:
+  ConstKind const_kind;
+  TyTy::BaseType *ty;
+  tree value;
+  std::string symbol;
 };
 
 class OpaqueType : public BaseType
@@ -1158,14 +1225,14 @@ class ArrayType : public BaseType
 public:
   static constexpr auto KIND = TypeKind::ARRAY;
 
-  ArrayType (HirId ref, location_t locus, tree capacity, TyVar base,
+  ArrayType (HirId ref, location_t locus, ConstType *capacity, TyVar base,
 	     std::set<HirId> refs = std::set<HirId> ())
     : BaseType (ref, ref, TypeKind::ARRAY,
 		{Resolver::CanonicalPath::create_empty (), locus}, refs),
       element_type (base), capacity (capacity)
   {}
 
-  ArrayType (HirId ref, HirId ty_ref, location_t locus, tree capacity,
+  ArrayType (HirId ref, HirId ty_ref, location_t locus, ConstType *capacity,
 	     TyVar base, std::set<HirId> refs = std::set<HirId> ())
     : BaseType (ref, ty_ref, TypeKind::ARRAY,
 		{Resolver::CanonicalPath::create_empty (), locus}, refs),
@@ -1188,13 +1255,13 @@ public:
 
   BaseType *clone () const final override;
 
-  tree get_capacity () const { return capacity; }
+  ConstType *get_capacity () const { return capacity; }
 
   ArrayType *handle_substitions (SubstitutionArgumentMappings &mappings);
 
 private:
   TyVar element_type;
-  tree capacity;
+  ConstType *capacity;
 };
 
 class SliceType : public BaseType

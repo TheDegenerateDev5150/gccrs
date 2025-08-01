@@ -173,6 +173,7 @@ TypeBoundsProbe::assemble_marker_builtins ()
       assemble_builtin_candidate (LangItem::Kind::SIZED);
       break;
 
+    case TyTy::CONST:
     case TyTy::DYNAMIC:
     case TyTy::ERROR:
       break;
@@ -721,7 +722,7 @@ TypeBoundPredicate::handle_substitions (
       if (sub.get_param_ty () == nullptr)
 	continue;
 
-      ParamType *p = sub.get_param_ty ();
+      auto p = sub.get_param_ty ();
       BaseType *r = p->resolve ();
       BaseType *s = Resolver::SubstMapperInternal::Resolve (r, subst_mappings);
 
@@ -851,8 +852,8 @@ TypeBoundPredicate::is_equal (const TypeBoundPredicate &other) const
       const SubstitutionParamMapping &a = substitutions.at (i);
       const SubstitutionParamMapping &b = other.substitutions.at (i);
 
-      const ParamType *ap = a.get_param_ty ();
-      const ParamType *bp = b.get_param_ty ();
+      const auto ap = a.get_param_ty ();
+      const auto bp = b.get_param_ty ();
 
       const BaseType *apd = ap->destructure ();
       const BaseType *bpd = bp->destructure ();
